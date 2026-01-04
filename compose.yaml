@@ -1,0 +1,38 @@
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+#  app:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    container_name: digitalurpaq-ai-agent
+#    depends_on:
+#      elasticsearch:
+#        condition: service_healthy
+#    environment:
+#      - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200
+#    ports:
+#      - "8080:8080"
+#    networks:
+#      - app-network
+#    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
