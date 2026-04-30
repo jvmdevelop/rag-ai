@@ -5,6 +5,8 @@ import com.jvmd.digitalurpaq_ai_agent.service.rag.util.CacheService;
 import com.jvmd.digitalurpaq_ai_agent.service.rag.util.RagMetrics;
 import com.jvmd.digitalurpaq_ai_agent.service.RetrievalService;
 import com.jvmd.digitalurpaq_ai_agent.service.rag.model.CacheStats;
+import com.jvmd.digitalurpaq_ai_agent.service.rag.util.storage.FileContextStore;
+import com.jvmd.digitalurpaq_ai_agent.service.rag.util.storage.MetricsFileStore;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -23,6 +25,8 @@ public class RagAdminController {
     private final RagMetrics ragMetrics;
     private final CacheService cacheService;
     private final RetrievalService retrievalService;
+    private final FileContextStore fileContextStore;
+    private final MetricsFileStore metricsFileStore;
 
     @GetMapping(value = "/metrics", produces = MediaType.APPLICATION_JSON_VALUE)
     public Mono<Map<String, Object>> getMetrics() {
@@ -50,7 +54,8 @@ public class RagAdminController {
                     "queryCacheValid", cacheStats.queryCacheValid(),
                     "responseCacheValid", cacheStats.responseCacheValid()
             ));
-            
+            response.put("fileStore", fileContextStore.getStats());
+
             return response;
         });
     }
@@ -96,6 +101,11 @@ public class RagAdminController {
             response.put("message", "Cache cleared: " + type);
             return response;
         });
+    }
+
+    @GetMapping(value = "/metrics/history", produces = MediaType.APPLICATION_JSON_VALUE)
+    public Mono<Object> getMetricsHistory(@RequestParam(defaultValue = "7") int days) {
+        return Mono.fromCallable(() -> metricsFileStore.getHistory(days));
     }
 
     @PostMapping(value = "/metrics/reset", produces = MediaType.APPLICATION_JSON_VALUE)
