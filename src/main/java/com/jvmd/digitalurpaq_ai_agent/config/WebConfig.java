@@ -1,6 +1,7 @@
 package com.jvmd.digitalurpaq_ai_agent.config;
 
-import org.springframework.beans.factory.annotation.Value;
+import com.jvmd.digitalurpaq_ai_agent.config.properties.AppProperties;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.config.CorsRegistry;
 import org.springframework.web.reactive.config.EnableWebFlux;
@@ -8,17 +9,18 @@ import org.springframework.web.reactive.config.WebFluxConfigurer;
 
 @Configuration
 @EnableWebFlux
+@RequiredArgsConstructor
 public class WebConfig implements WebFluxConfigurer {
 
-    @Value("${frontend.url}")
-    private String frontendUrl;
+    private final AppProperties appProperties;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
-                .allowedOrigins(frontendUrl)
+                .allowedOrigins(appProperties.frontendUrl())
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
+                .exposedHeaders("X-Request-Id", "X-RateLimit-Remaining")
                 .allowCredentials(true)
                 .maxAge(3600);
     }

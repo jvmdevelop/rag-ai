@@ -1,6 +1,7 @@
 package com.jvmd.digitalurpaq_ai_agent.config;
 
-import org.springframework.beans.factory.annotation.Value;
+import com.jvmd.digitalurpaq_ai_agent.config.properties.S3Properties;
+import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,36 +14,30 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import java.net.URI;
 
 @Configuration
+@RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "app.s3", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class S3Config {
 
+    private final S3Properties s3Properties;
+
     @Bean
-    public S3Client s3Client(
-            @Value("${app.s3.endpoint}") String endpoint,
-            @Value("${app.s3.region:us-east-1}") String region,
-            @Value("${app.s3.access-key}") String accessKey,
-            @Value("${app.s3.secret-key}") String secretKey
-    ) {
+    public S3Client s3Client() {
         return S3Client.builder()
-                .endpointOverride(URI.create(endpoint))
-                .region(Region.of(region))
+                .endpointOverride(URI.create(s3Properties.endpoint()))
+                .region(Region.of(s3Properties.region()))
                 .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(accessKey, secretKey)))
+                        AwsBasicCredentials.create(s3Properties.accessKey(), s3Properties.secretKey())))
                 .forcePathStyle(true)
                 .build();
     }
 
     @Bean
-    public S3Presigner s3Presigner(
-            @Value("${app.s3.endpoint}") String endpoint,
-            @Value("${app.s3.region:us-east-1}") String region,
-            @Value("${app.s3.access-key}") String accessKey,
-            @Value("${app.s3.secret-key}") String secretKey
-    ) {
+    public S3Presigner s3Presigner() {
         return S3Presigner.builder()
-                .endpointOverride(URI.create(endpoint))
-                .region(Region.of(region))
+                .endpointOverride(URI.create(s3Properties.endpoint()))
+                .region(Region.of(s3Properties.region()))
                 .credentialsProvider(StaticCredentialsProvider.create(
-                        AwsBasicCredentials.create(accessKey, secretKey)))
+                        AwsBasicCredentials.create(s3Properties.accessKey(), s3Properties.secretKey())))
                 .build();
     }
 }

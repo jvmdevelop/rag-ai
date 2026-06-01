@@ -1,10 +1,10 @@
 package com.jvmd.digitalurpaq_ai_agent.service;
 
+import com.jvmd.digitalurpaq_ai_agent.config.properties.AppProperties;
 import com.jvmd.digitalurpaq_ai_agent.model.RetrievalDocument;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Service;
 
@@ -17,29 +17,22 @@ import java.util.List;
 public class DataInitializer implements CommandLineRunner {
 
     private final RetrievalService retrievalService;
+    private final AppProperties appProperties;
 
-    @Value("${pdfPath:raspisanie.pdf}")
-    private String pdfPath;
-
-    @Value("${isInit:false}")
-    private boolean isInit;
-
-    @Value("${useChunking:true}")
-    private boolean useChunking;
-
-    public DataInitializer(RetrievalService retrievalService) {
+    public DataInitializer(RetrievalService retrievalService, AppProperties appProperties) {
         this.retrievalService = retrievalService;
+        this.appProperties = appProperties;
     }
 
     @Override
     public void run(String... args) throws Exception {
-        if (isInit) {
+        if (appProperties.init()) {
             log.info("Data initialization skipped (isInit=true)");
             return;
         }
 
         log.info("=== Starting Data Initialization ===");
-        log.info("Use chunking: {}", useChunking);
+        log.info("Use chunking: {}", appProperties.useChunking());
 
         long startTime = System.currentTimeMillis();
 
@@ -50,7 +43,7 @@ public class DataInitializer implements CommandLineRunner {
 
             log.info("Created {} documents for indexing", documents.size());
 
-            if (useChunking) {
+            if (appProperties.useChunking()) {
                 log.info("Saving documents with chunking...");
                 retrievalService.saveAllWithChunking(documents)
                         .doOnNext(doc -> log.debug("Saved chunk: {}", doc.getId()))
@@ -77,7 +70,7 @@ public class DataInitializer implements CommandLineRunner {
 
     private String loadPdfIfExists() {
         try {
-            File file = new File(pdfPath);
+            File file = new File(appProperties.pdfPath());
             if (!file.exists()) {
                 log.warn("PDF file not found: {}", pdfPath);
                 return "";

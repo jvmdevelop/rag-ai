@@ -1,5 +1,6 @@
 package com.jvmd.digitalurpaq_ai_agent.service.rag.util;
 
+import com.jvmd.digitalurpaq_ai_agent.config.properties.RagProperties;
 import com.jvmd.digitalurpaq_ai_agent.llm.Llm7Client;
 import com.jvmd.digitalurpaq_ai_agent.service.rag.model.*;
 import lombok.extern.slf4j.Slf4j;
@@ -22,10 +23,7 @@ public class RagOrchestrator {
     private final CacheService cacheService;
     private final Llm7Client llm7Client;
     private final RagMetrics metrics;
-
-    private static final int TOP_K_DOCUMENTS = 5;
-    private static final int MAX_RETRIES = 2;
-    private static final Duration TIMEOUT = Duration.ofSeconds(30);
+    private final RagProperties ragProperties;
 
     public RagOrchestrator(QueryProcessor queryProcessor,
                           SearchStrategy searchStrategy,
@@ -33,7 +31,8 @@ public class RagOrchestrator {
                           ResponseValidator responseValidator,
                           CacheService cacheService,
                           Llm7Client llm7Client,
-                          RagMetrics metrics) {
+                          RagMetrics metrics,
+                          RagProperties ragProperties) {
         this.queryProcessor = queryProcessor;
         this.searchStrategy = searchStrategy;
         this.contextBuilder = contextBuilder;
@@ -41,11 +40,12 @@ public class RagOrchestrator {
         this.cacheService = cacheService;
         this.llm7Client = llm7Client;
         this.metrics = metrics;
+        this.ragProperties = ragProperties;
     }
 
     public Mono<RagResponse> processQuery(String userQuery) {
         long startTime = System.currentTimeMillis();
-        
+
         log.info("=== RAG Pipeline Started for query: {} ===", userQuery);
 
         return Mono.just(userQuery)
@@ -57,19 +57,19 @@ public class RagOrchestrator {
                     );
                 })
                 .flatMap(processedQuery -> {
-                    log.info("Step 2: Searching documents for category: {}", 
+                    log.info("Step 2: Searching documents for category: {}",
                             processedQuery.category());
-                    
+
                     return cacheService.getOrComputeSearch(
                             processedQuery.getSearchQuery(),
-                            searchStrategy.hybridSearch(processedQuery, TOP_K_DOCUMENTS)
+                            searchStrategy.hybridSearch(processedQuery, ragProperties.topK())
                                     .collectList()
                     ).map(docs -> new QueryWithDocs(processedQuery, docs));
                 })
                 .flatMap(queryWithDocs -> {
-                    log.info("Step 3: Building context from {} documents", 
+                    log.info("Step 3: Building context from {} documents",
                             queryWithDocs.documents().size());
-                    
+
                     if (queryWithDocs.documents().isEmpty()) {
                         return Mono.just(new ContextWithQuery(
                                 queryWithDocs.query(),
@@ -77,12 +77,12 @@ public class RagOrchestrator {
                                 queryWithDocs.documents()
                         ));
                     }
-                    
+
                     String context = contextBuilder.buildContext(
                             queryWithDocs.documents(),
                             queryWithDocs.query()
                     );
-                    
+
                     return Mono.just(new ContextWithQuery(
                             queryWithDocs.query(),
                             context,
@@ -91,7 +91,7 @@ public class RagOrchestrator {
                 })
                 .flatMap(contextWithQuery -> {
                     log.info("Step 4: Generating response");
-                    
+
                     return generateResponse(
                             contextWithQuery.context(),
                             contextWithQuery.query().originalQuery(),
@@ -104,37 +104,33 @@ public class RagOrchestrator {
                 })
                 .flatMap(responseWithContext -> {
                     log.info("Step 5: Validating response");
-                    
+
                     ValidationResult validation = responseValidator.validate(
                             responseWithContext.response(),
                             responseWithContext.query().originalQuery()
                     );
-                    
+
                     if (!validation.isValid()) {
                         log.warn("Response validation failed: {}", validation.issue());
                         metrics.recordValidationFailure(validation.issue());
                     }
-                    
-                    String finalResponse = validation.isValid() 
-                            ? validation.processedResponse()
-                            : validation.processedResponse();
-                    
+
                     return Mono.just(new RagResponse(
-                            finalResponse,
+                            validation.processedResponse(),
                             responseWithContext.query(),
                             responseWithContext.documents(),
                             validation.isValid(),
                             validation.issue()
                     ));
                 })
-                .retryWhen(Retry.backoff(MAX_RETRIES, Duration.ofSeconds(1))
+                .retryWhen(Retry.backoff(ragProperties.maxRetries(), Duration.ofSeconds(1))
                         .filter(throwable -> !(throwable instanceof IllegalArgumentException))
                         .doBeforeRetry(signal -> {
                             log.warn("Retrying RAG pipeline, attempt: {}", signal.totalRetries() + 1);
                             metrics.recordRetry();
                         })
                 )
-                .timeout(TIMEOUT)
+                .timeout(ragProperties.pipelineTimeout())
                 .doOnSuccess(response -> {
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("=== RAG Pipeline Completed in {}ms ===", duration);
@@ -142,7 +138,7 @@ public class RagOrchestrator {
                 })
                 .doOnError(error -> {
                     long duration = System.currentTimeMillis() - startTime;
-                    log.error("=== RAG Pipeline Failed after {}ms: {} ===", 
+                    log.error("=== RAG Pipeline Failed after {}ms: {} ===",
                             duration, error.getMessage());
                     metrics.recordFailure(error);
                 })
@@ -153,24 +149,23 @@ public class RagOrchestrator {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    private Mono<String> generateResponse(String context, String userQuery, 
+    private Mono<String> generateResponse(String context, String userQuery,
                                          ProcessedQuery processedQuery) {
         String prompt = contextBuilder.buildPrompt(context, userQuery, processedQuery);
-        
-        log.debug("Calling LLM7.io with prompt length: {}", prompt.length());
-        
+
+        log.debug("Calling LLM with prompt length: {}", prompt.length());
+
         return llm7Client.chat(prompt)
-                .timeout(Duration.ofSeconds(60))
                 .onErrorResume(e -> {
                     log.error("Error generating response: {}", e.getMessage(), e);
-                    
+
                     if (!context.isBlank()) {
-                        String fallback = "На основе найденной информации:\n\n" + 
-                                         context.substring(0, Math.min(500, context.length())) + 
+                        String fallback = "На основе найденной информации:\n\n" +
+                                         context.substring(0, Math.min(500, context.length())) +
                                          "\n\n(Полный ответ не был сгенерирован из-за технической ошибки)";
                         return Mono.just(fallback);
                     }
-                    
+
                     return Mono.just("Извините, произошла ошибка при генерации ответа. Попробуйте еще раз.");
                 });
     }
@@ -183,13 +178,13 @@ public class RagOrchestrator {
         } else {
             errorMessage += "Пожалуйста, попробуйте еще раз позже.";
         }
-        
+
         return new RagResponse(
                 errorMessage,
                 new ProcessedQuery(query, "", QueryCategory.GENERAL, ""),
                 List.of(),
                 false,
-                ResponseValidator.ValidationIssue.EMPTY_RESPONSE
+                ValidationIssue.EMPTY_RESPONSE
         );
     }
 
